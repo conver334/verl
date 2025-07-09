@@ -778,6 +778,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
         data.meta_info["micro_batch_size"] = self.config.rollout.log_prob_micro_batch_size_per_gpu
         data.meta_info["max_token_len"] = self.config.rollout.log_prob_max_token_len_per_gpu
         data.meta_info["use_dynamic_bsz"] = self.config.rollout.log_prob_use_dynamic_bsz
+        data.meta_info["use_dynamic_bsz_balance"] = self.config.rollout.log_prob_use_dynamic_bsz_balance
         data.meta_info["temperature"] = self.config.rollout.temperature
         # perform recompute log_prob
         with self.ulysses_sharding_manager:
@@ -824,6 +825,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
         data.meta_info["temperature"] = self.config.rollout.temperature
         data.meta_info["max_token_len"] = self.config.ref.log_prob_max_token_len_per_gpu
         data.meta_info["use_dynamic_bsz"] = self.config.ref.log_prob_use_dynamic_bsz
+        data.meta_info["use_dynamic_bsz_balance"] = self.config.ref.log_prob_use_dynamic_bsz_balance
         with self.ulysses_sharding_manager:
             data = self.ulysses_sharding_manager.preprocess_data(data)
             output, _ = self.ref_policy.compute_log_prob(data=data, calculate_entropy=False)
@@ -1616,7 +1618,8 @@ class RewardModelWorker(Worker, DistProfilerExtension):
             use_dynamic_bsz = self.config.use_dynamic_bsz
             if use_dynamic_bsz:
                 max_token_len = self.config.forward_max_token_len_per_gpu * self.ulysses_sequence_parallel_size
-                micro_batches, indices = rearrange_micro_batches(batch=rm_data.batch, max_token_len=max_token_len)
+                use_dynamic_bsz_balance = self.config.use_dynamic_bsz_balance
+                micro_batches, indices = rearrange_micro_batches(batch=rm_data.batch, max_token_len=max_token_len, use_dynamic_bsz_balance=use_dynamic_bsz_balance)
             else:
                 micro_batches = rm_data.batch.split(self.config.micro_batch_size_per_gpu)
             output = []
