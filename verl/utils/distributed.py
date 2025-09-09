@@ -20,8 +20,22 @@ import torch.distributed
 
 from verl.utils.device import get_device_name, get_nccl_backend, get_torch_device
 
+def set_numa_affinity():
+    try:
+        import pynvml
+        pynvml.nvmlInit()
+        local_rank = int(os.environ["RANK"])%8
+        handle = pynvml.nvmlDeviceGetHandleByIndex(local_rank)
+        pynvml.nvmlDeviceSetCpuAffinity(handle)
+        pynvml.nvmlShutdown()
+
+    except ImportError:
+        print("Warning: pynvml not available, skipping NUMA affinity setup")
+    except Exception as e:
+        print(f"Warning: Failed to set NUMA affinity: {e}")
 
 def initialize_global_process_group(timeout_second=36000):
+    set_numa_affinity()
     torch.distributed.init_process_group(
         get_nccl_backend(),
         timeout=timedelta(seconds=timeout_second),
@@ -49,6 +63,7 @@ def initialize_global_process_group_ray(timeout_second=None):
     timeout = timedelta(seconds=timeout_second) if timeout_second is not None else None
 
     if not torch.distributed.is_initialized():
+        set_numa_affinity()
         rank = int(os.environ.get("RANK", 0))
         world_size = int(os.environ.get("WORLD_SIZE", 1))
         torch.distributed.init_process_group(
