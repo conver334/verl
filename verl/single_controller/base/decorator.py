@@ -18,7 +18,8 @@ from types import FunctionType
 
 from verl.protocol import DataProtoFuture, _padding_size_key
 from verl.utils.py_functional import DynamicEnum
-
+import torch
+from verl.utils.seqlen_balancing import karmarkar_karp
 # here we add a magic number of avoid user-defined function already have this attribute
 MAGIC_ATTR = "attrs_3141562937"
 
@@ -67,6 +68,20 @@ def init_predefined_execute_mode():
 init_predefined_dispatch_mode()
 init_predefined_execute_mode()
 
+def _balance_data_proto(data_proto, chunks):
+    if isinstance(data_proto, DataProtoFuture):
+        # DataProtoFuture暂不支持排序，直接chunk
+        return data_proto.chunk(chunks=chunks)
+    
+    # 检查是否有attention_mask字段，按照workload均匀划分
+    if (data_proto.batch is not None and "attention_mask" in data_proto.batch.keys()):
+        attention_lengths = data_proto.batch["attention_mask"].sum(dim=1)
+        square_attention_lengths = attention_lengths ** 2
+        partitions = karmarkar_karp(square_attention_lengths, chunks, True)
+        chunk_square_sums = [square_attention_lengths[partition].sum().item() for partition in partitions]
+        ordered_partitions = torch.tensor(partitions).view(-1)
+        data_proto.reorder(ordered_partitions)
+    return data_proto.chunk(chunks=chunks)
 
 def _split_args_kwargs_data_proto(chunks, *args, **kwargs):
     from verl.protocol import DataProto, DataProtoFuture
@@ -74,12 +89,12 @@ def _split_args_kwargs_data_proto(chunks, *args, **kwargs):
     splitted_args = []
     for arg in args:
         assert isinstance(arg, DataProto | DataProtoFuture)
-        splitted_args.append(arg.chunk(chunks=chunks))
+        splitted_args.append(_balance_data_proto(arg, chunks))
 
     splitted_kwargs = {}
     for key, val in kwargs.items():
         assert isinstance(val, DataProto | DataProtoFuture)
-        splitted_kwargs[key] = val.chunk(chunks=chunks)
+        splitted_kwargs[key] = _balance_data_proto(val, chunks)
 
     return splitted_args, splitted_kwargs
 
@@ -103,7 +118,7 @@ def _split_args_kwargs_data_proto_with_auto_padding(chunks, *args, **kwargs):
                     f"expecting all arg share same length of {data_proto_len}, but got {len(obj)}"
                 )
             obj.padding(padding_size=padding_size)
-        return obj.chunk(chunks=chunks)
+        return _balance_data_proto(obj, chunks)
 
     splitted_args = [_padding_and_split_data(arg, chunks) for arg in args]
     splitted_kwargs = {key: _padding_and_split_data(val, chunks) for key, val in kwargs.items()}
@@ -187,7 +202,6 @@ def dispatch_dp_compute_data_proto_with_func(worker_group, *args, **kwargs):
 
     assert isinstance(worker_group, WorkerGroup)
     assert isinstance(args[0], FunctionType)  # NOTE: The first one args is a function!
-
     splitted_args, splitted_kwargs = _split_args_kwargs_data_proto(worker_group.world_size, *args[1:], **kwargs)
     splitted_args_with_func = [[args[0]] * worker_group.world_size] + splitted_args
     return splitted_args_with_func, splitted_kwargs
