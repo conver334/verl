@@ -16,13 +16,14 @@ import inspect
 from functools import partial, wraps
 from types import FunctionType
 
-from verl.protocol import DataProtoFuture, _padding_size_key
+from verl.protocol import DataProto, DataProtoFuture, _padding_size_key
 from verl.utils.py_functional import DynamicEnum
 import torch
 from verl.utils.seqlen_balancing import karmarkar_karp
+from verl.utils.flops_counter import FlopsCounter
 # here we add a magic number of avoid user-defined function already have this attribute
 MAGIC_ATTR = "attrs_3141562937"
-
+import os
 
 class Dispatch(DynamicEnum):
     """Enum class defining different dispatch modes for distributed computation.
@@ -68,20 +69,64 @@ def init_predefined_execute_mode():
 init_predefined_dispatch_mode()
 init_predefined_execute_mode()
 
-def _balance_data_proto(data_proto, chunks):
-    if isinstance(data_proto, DataProtoFuture):
-        # DataProtoFuture暂不支持排序，直接chunk
-        return data_proto.chunk(chunks=chunks)
+def _compute_smart_workloads(data_proto):
+    """
+    计算更准确的workload，使用FlopsCounter来估算实际的计算量。
+    如果无法获取模型配置，则回退到简单的seq_len^2计算。
     
-    # 检查是否有attention_mask字段，按照workload均匀划分
-    if (data_proto.batch is not None and "attention_mask" in data_proto.batch.keys()):
-        attention_lengths = data_proto.batch["attention_mask"].sum(dim=1)
-        square_attention_lengths = attention_lengths ** 2
-        partitions = karmarkar_karp(square_attention_lengths, chunks, True)
-        chunk_square_sums = [square_attention_lengths[partition].sum().item() for partition in partitions]
-        ordered_partitions = torch.tensor(partitions).view(-1)
-        data_proto.reorder(ordered_partitions)
-    return data_proto.chunk(chunks=chunks)
+    Returns:
+        torch.Tensor: workload for each sample in the batch
+    """
+    if not (isinstance(data_proto, DataProto) and data_proto.batch is not None and "attention_mask" in data_proto.batch.keys()):
+        return None
+        
+    seqlens = data_proto.batch["attention_mask"].sum(dim=1)
+    
+    # 尝试从meta_info中获取模型配置并使用FlopsCounter
+    if hasattr(data_proto, 'meta_info') and data_proto.meta_info.get('model_config') is not None:
+        try:
+            model_config = data_proto.meta_info['model_config']
+            flops_counter = FlopsCounter(model_config)
+            
+            # 计算每个样本的理论FLOPs（不考虑时间，只计算计算量）
+            workloads = []
+            for seqlen in seqlens:
+                seqlen_item = seqlen.item()
+                # 使用FlopsCounter的内部函数计算单个样本的FLOPs
+                # 注意：这里delta_time设为1，我们只关心相对的计算量比例
+                sample_flops, _ = flops_counter.estimate_flops([seqlen_item], 1.0)
+                workloads.append(sample_flops)
+            
+            workloads = torch.tensor(workloads, dtype=seqlens.dtype, device=seqlens.device)
+            return workloads
+            
+        except Exception as e:
+            print(f"Warning: FlopsCounter calculation failed: {e}. Falling back to seq_len^2 method.")
+    
+    # Fallback: 使用原来的seq_len^2方法
+    workloads = seqlens ** 2
+
+    return workloads
+
+
+def _balance_data_proto(data_proto, chunks):
+    """
+    改进版的数据平衡函数，使用更准确的workload计算。
+    优先使用FlopsCounter进行计算量估算，如果不可用则回退到简单的attention计算量。
+    """
+    data_env = os.environ.get('DATA_BALANCE', 'False').lower() == 'true'
+    if not data_env:
+        return data_proto
+
+    workloads = _compute_smart_workloads(data_proto)
+    
+    if workloads is not None:
+        partitions = karmarkar_karp(workloads, chunks, True)
+        # chunk_square_sums = [workloads[partition].sum().item() for partition in partitions]
+        ordered_indices = torch.tensor(partitions).view(-1)
+        data_proto.reorder(ordered_indices)
+
+    return data_proto
 
 def _split_args_kwargs_data_proto(chunks, *args, **kwargs):
     from verl.protocol import DataProto, DataProtoFuture
@@ -89,12 +134,17 @@ def _split_args_kwargs_data_proto(chunks, *args, **kwargs):
     splitted_args = []
     for arg in args:
         assert isinstance(arg, DataProto | DataProtoFuture)
-        splitted_args.append(_balance_data_proto(arg, chunks))
+        splitted_args.append(_balance_data_proto(arg, chunks).chunk(chunks=chunks))
 
     splitted_kwargs = {}
     for key, val in kwargs.items():
         assert isinstance(val, DataProto | DataProtoFuture)
-        splitted_kwargs[key] = _balance_data_proto(val, chunks)
+        splitted_kwargs[key] = _balance_data_proto(val, chunks).chunk(chunks=chunks)
+    
+    if torch.distributed.get_rank()!=0:
+        __import__('remote_pdb').RemotePdb('127.0.0.1', 4444+torch.distributed.get_rank()).set_trace()   
+    else:
+        __import__('ipdb').set_trace()
 
     return splitted_args, splitted_kwargs
 
@@ -118,7 +168,7 @@ def _split_args_kwargs_data_proto_with_auto_padding(chunks, *args, **kwargs):
                     f"expecting all arg share same length of {data_proto_len}, but got {len(obj)}"
                 )
             obj.padding(padding_size=padding_size)
-        return _balance_data_proto(obj, chunks)
+        return _balance_data_proto(obj, chunks).chunk(chunks=chunks)
 
     splitted_args = [_padding_and_split_data(arg, chunks) for arg in args]
     splitted_kwargs = {key: _padding_and_split_data(val, chunks) for key, val in kwargs.items()}
