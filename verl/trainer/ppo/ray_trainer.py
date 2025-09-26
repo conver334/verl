@@ -905,7 +905,16 @@ class RayPPOTrainer:
         """Reorder the data on single controller such that each dp rank gets similar total tokens"""
         attention_mask = batch.batch["attention_mask"]
         batch_size = attention_mask.shape[0]
-        global_seqlen_lst = batch.batch["attention_mask"].view(batch_size, -1).sum(-1).tolist()  # (train_batch_size,)
+        global_seqlen_lst = batch.batch["attention_mask"].view(batch_size, -1).sum(-1)  # (train_batch_size,)
+        dp_env = int(os.environ.get("DATA_BALANCE", 0))
+        if dp_env == 1:
+            print("DATA_BALANCE is 1")
+            global_seqlen_lst = global_seqlen_lst**2
+        elif dp_env == 2:
+            print("DATA_BALANCE is 2")
+            global_seqlen_lst = global_seqlen_lst**2 + global_seqlen_lst * 33024
+        else:
+            print("DATA_BALANCE is 0")
         world_size = self.actor_rollout_wg.world_size
         global_partition_lst = get_seqlen_balanced_partitions(
             global_seqlen_lst, k_partitions=world_size, equal_size=True
