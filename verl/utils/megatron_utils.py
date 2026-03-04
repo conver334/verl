@@ -355,25 +355,6 @@ def unwrap_model(model, module_instances=ALL_MODULE_WRAPPER_CLASSNAMES):
     return unwrapped_model
 
 
-def synchronize_megatron_fsdp_params(model_chunks: list) -> bool:
-    """Synchronize FSDP parameter state from raw sharded tensors back to DTensors.
-
-    Returns True if synchronization was performed.
-    """
-    for model_chunk in model_chunks:
-        fsdp = model_chunk.module
-        if getattr(fsdp, "data_parallel_sharding_strategy", None) == "optim_grads_params":
-            fsdp.synchronize_param_gather()
-            return True
-    return False
-
-
-def restore_megatron_fsdp_params(model_chunks: list):
-    """Restore FSDP parameters to raw sharded state for training."""
-    for model_chunk in model_chunks:
-        model_chunk.start_param_sync()
-
-
 def convert_config(hf_config: PretrainedConfig, megatron_config) -> TransformerConfig:
     """[Deprecated] convert config
 
