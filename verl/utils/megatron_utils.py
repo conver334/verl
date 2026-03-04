@@ -278,9 +278,6 @@ def make_megatron_module(
             tf_config = get_model_config(model[0] if isinstance(model, list) else model)
         else:
             ddp_config = {}
-            if override_ddp_config is not None:
-                ddp_config.update(override_ddp_config)
-
             if wrap_config.use_megatron_fsdp:
                 ddp_config.setdefault("use_distributed_optimizer", True)
                 ddp_config.setdefault("check_for_nan_in_grad", True)
@@ -288,6 +285,8 @@ def make_megatron_module(
                 ddp_config.setdefault("data_parallel_sharding_strategy", "optim_grads_params")
                 ddp_config.setdefault("overlap_grad_reduce", True)
                 wrap_config.wrap_with_ddp = True
+            if override_ddp_config is not None:
+                ddp_config.update(override_ddp_config)
 
             model = bridge.get_model(
                 post_model_creation_callbacks=post_model_creation_callbacks,
