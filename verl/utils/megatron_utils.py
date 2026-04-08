@@ -252,12 +252,20 @@ def make_megatron_module(
 
             # Create DDP config if needed
             ddp_config = None
+            if wrap_config.use_megatron_fsdp:
+                wrap_config.wrap_with_ddp = True
             if wrap_config.wrap_with_ddp:
                 from megatron.bridge.training.config import DistributedDataParallelConfig
 
                 ddp_config_dict = {
                     "use_distributed_optimizer": wrap_config.use_distributed_optimizer,
                 }
+                if wrap_config.use_megatron_fsdp:
+                    ddp_config_dict["use_distributed_optimizer"] = True
+                    ddp_config_dict.setdefault("check_for_nan_in_grad", True)
+                    ddp_config_dict.setdefault("use_megatron_fsdp", True)
+                    ddp_config_dict.setdefault("data_parallel_sharding_strategy", "optim_grads_params")
+                    ddp_config_dict.setdefault("overlap_grad_reduce", True)
                 # Apply any DDP config overrides
                 if override_ddp_config is not None:
                     ddp_config_dict.update(override_ddp_config)
@@ -272,6 +280,8 @@ def make_megatron_module(
                 ddp_config=ddp_config,
                 fp16=provider.fp16,
                 bf16=provider.bf16,
+                use_megatron_fsdp=wrap_config.use_megatron_fsdp,
+                data_parallel_random_init=False,
             )
 
             # Extract TransformerConfig from the created model
@@ -492,9 +502,11 @@ def load_megatron_model_to_gpu(models, load_grad=True, load_frozen_params=True):
             for buffers in model_chunk_all_buffers:
                 for buffer in buffers:
                     # sometimes, we don't want to load grad for pure inference
-                    if load_grad and hasattr(buffer, "grad_data_size"):
-                        buffer.grad_data.storage().resize_(buffer.grad_data_size)
-                        buffer.grad_data.zero_()
+                    if load_grad:
+                        if buffer.grad_data.storage().size() == 0 and buffer.grad_data_size > 0:
+                            buffer.grad_data.storage().resize_(buffer.grad_data_size)
+                        if buffer.grad_data.storage().size() > 0:
+                            buffer.grad_data.zero_()
 
                     if buffer.param_data.storage().size() == 0:
                         buffer.param_data.storage().resize_(buffer.param_data_size)
@@ -1337,13 +1349,15 @@ def get_megatron_module_device(models: list[Any]) -> str:
         return "cpu"
 
     model_chunk = models[0]
-    if not model_chunk.buffers:
+    buffers = getattr(model_chunk, "buffers", None)
+    if not isinstance(buffers, list) or not buffers:
         try:
-            return next(model_chunk.module.parameters()).device.type
+            module = getattr(model_chunk, "module", model_chunk)
+            return next(module.parameters()).device.type
         except StopIteration:
             return "cpu"
 
-    buffer = model_chunk.buffers[0]
+    buffer = buffers[0]
     if buffer.param_data.storage().size() == 0:
         return "cpu"
     else:
