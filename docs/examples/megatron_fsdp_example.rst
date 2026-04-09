@@ -6,7 +6,7 @@ Last updated: 04/08/2026.
 Introduction
 ------------
 
-In this example, we run RL training with Megatron-FSDP:
+In this example, we run SFT and RL training with Megatron-FSDP:
 
 - Runtime image: ``verlai/verl:vllm011.dev7``
 
@@ -72,7 +72,16 @@ Step 3: Prepare datasets
    ls -lh ~/data/gsm8k/train.parquet ~/data/gsm8k/test.parquet
    ls -lh ~/data/math/train.parquet ~/data/math/test.parquet
 
-Step 4: Run Megatron-FSDP RL
+Step 4: Run Megatron-FSDP SFT
+----------------------------
+
+Before launch, check and update key fields `MODEL_PATH` and `SAVE_PATH` in the script.
+
+.. code:: bash
+
+   bash verl/examples/sft/gsm8k/run_qwen_megatron_fsdp.sh
+
+Step 5: Run Megatron-FSDP RL
 ----------------------------
 
 Before launch, check and update key fields in
