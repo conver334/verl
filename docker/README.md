@@ -24,12 +24,36 @@ Latest docker file:
 - [Dockerfile.stable.vllm](https://github.com/volcengine/verl/blob/main/docker/Dockerfile.stable.vllm)
 - [Dockerfile.stable.sglang](https://github.com/volcengine/verl/blob/main/docker/Dockerfile.stable.sglang)
 
-All pre-built images are available in dockerhub: https://hub.docker.com/r/verlai/verl. For example, `verlai/verl:sgl056.latest`, `verlai/verl:vllm012.dev3`.
+All pre-built images are available in dockerhub: https://hub.docker.com/r/verlai/verl. For example, `verlai/verl:sgl059.latest`, `verlai/verl:vllm017.latest`.
 
 You can find the latest images used for development and ci in our github workflows:
 - [.github/workflows/vllm.yml](https://github.com/volcengine/verl/blob/main/.github/workflows/vllm.yml)
 - [.github/workflows/sgl.yml](https://github.com/volcengine/verl/blob/main/.github/workflows/sgl.yml)
 
+
+## Building Locally
+
+To build an image from source:
+
+```sh
+docker build -f docker/Dockerfile.stable.vllm -t verl:vllm-local .
+```
+
+For users in China who need an apt mirror to speed up package downloads, pass `APT_MIRROR`:
+
+```sh
+docker build -f docker/Dockerfile.stable.vllm \
+    --build-arg APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn \
+    -t verl:vllm-local .
+```
+
+### GB200 / aarch64
+
+Pre-built images for GB200 (aarch64) are not yet published. Users should build locally on an aarch64 machine. Pre-built images will be added once available.
+
+```sh
+docker build -f docker/Dockerfile.stable.vllm -t verl:vllm-arm64 .
+```
 
 ## Installation from Docker
 
@@ -62,6 +86,7 @@ pip3 install -e .[sglang]
 
 ## Release History
 
+- 2026/03/10: update vllm stable image to vllm==0.17.0; update sglang stable image to sglang==0.5.9
 - 2026/01/17: update vllm stable image to torch==2.9.1, cudnn==9.16, deepep==1.2.1
 - 2025/12/23: update vllm stable image to vllm==0.12.0; update sglang stable image to sglang==0.5.6
 - 2025/11/18: update vllm stable image to vllm==0.11.1; update sglang stable image to sglang==0.5.5
