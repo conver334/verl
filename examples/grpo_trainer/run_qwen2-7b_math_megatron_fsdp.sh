@@ -2,8 +2,8 @@ set -x
 
 export CUDA_DEVICE_MAX_CONNECTIONS=1 # For megatron communication/computation overlapping
 unset ROCR_VISIBLE_DEVICES
-# export VLLM_USE_V1=1
-# export VLLM_ALLREDUCE_USE_SYMM_MEM=0
+export VLLM_USE_V1=1
+export VLLM_ALLREDUCE_USE_SYMM_MEM=0
 
 rollout_mode="async"
 export VLLM_USE_V1=1
@@ -36,7 +36,7 @@ python3 -m verl.trainer.main_ppo --config-path=config \
     actor_rollout_ref.actor.ppo_mini_batch_size=16 \
     actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=2 \
     actor_rollout_ref.actor.megatron.pipeline_model_parallel_size=1 \
-    actor_rollout_ref.actor.megatron.tensor_model_parallel_size=1 \
+    actor_rollout_ref.actor.megatron.tensor_model_parallel_size=4 \
     actor_rollout_ref.actor.megatron.use_mbridge=True \
     actor_rollout_ref.actor.megatron.vanilla_mbridge=False \
     actor_rollout_ref.actor.megatron.use_megatron_fsdp=True \
@@ -52,12 +52,12 @@ python3 -m verl.trainer.main_ppo --config-path=config \
     actor_rollout_ref.rollout.n=2 \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=2 \
     actor_rollout_ref.ref.megatron.pipeline_model_parallel_size=1 \
-    actor_rollout_ref.ref.megatron.tensor_model_parallel_size=1 \
+    actor_rollout_ref.ref.megatron.tensor_model_parallel_size=4 \
     algorithm.use_kl_in_reward=False \
     trainer.critic_warmup=0 \
     trainer.logger='["console","wandb"]' \
     trainer.project_name='verl_grpo_example_gsm8k_math' \
-    trainer.experiment_name='qwen2_7b_megatron' \
+    trainer.experiment_name='qwen2_7b_megatron_fsdp' \
     trainer.n_gpus_per_node=8 \
     trainer.nnodes=1 \
     trainer.save_freq=20 \
