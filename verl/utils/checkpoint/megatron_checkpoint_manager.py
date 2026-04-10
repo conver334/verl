@@ -431,15 +431,7 @@ class MegatronCheckpointManager(BaseCheckpointManager):
                 self.bridge.load_hf_weights(self.model, hf_model_path)
             log_with_rank(f"Loaded HF model checkpoint from {hf_model_path} with bridge", rank=self.rank, logger=logger)
         # Load PEFT adapter checkpoint if available
-        is_fsdp = getattr(getattr(self.model[0], "ddp_config", None), "use_megatron_fsdp", False)
-        if self.should_load_optimizer and is_fsdp:
-            log_with_rank(
-                "Skipping optimizer state loading for Megatron FSDP (not yet supported). "
-                "Training will resume with fresh optimizer state.",
-                rank=self.rank,
-                logger=logger,
-            )
-        elif self.should_load_optimizer:
+        if self.should_load_model and self.peft_cls is not None:
             adapter_ckpt_path = os.path.join(local_path, "adapter_checkpoint")
             if os.path.exists(adapter_ckpt_path):
                 from verl.utils.megatron_peft_utils import load_adapter_checkpoint
@@ -462,7 +454,15 @@ class MegatronCheckpointManager(BaseCheckpointManager):
                     logger=logger,
                 )
 
-        if self.should_load_optimizer:
+        is_fsdp = getattr(getattr(self.model[0], "ddp_config", None), "use_megatron_fsdp", False)
+        if self.should_load_optimizer and is_fsdp:
+            log_with_rank(
+                "Skipping optimizer state loading for Megatron FSDP (not yet supported). "
+                "Training will resume with fresh optimizer state.",
+                rank=self.rank,
+                logger=logger,
+            )
+        elif self.should_load_optimizer:
             assert "optimizer" in state_dict, (
                 f"Optimizer state dict not found in {state_dict.keys()}. Please check the checkpoint file {local_path}."
             )
