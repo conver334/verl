@@ -263,6 +263,7 @@ class MegatronCheckpointManager(BaseCheckpointManager):
 
         # All ranks save model state dict when it is needed for either model checkpointing
         # or optimizer sharded_state_dict generation.
+        is_fsdp = getattr(getattr(self.model[0], "ddp_config", None), "use_megatron_fsdp", False)
         if should_generate_model_sections:
             for vpp_rank, model in enumerate(self.model):
                 if len(self.model) > 1:
@@ -270,7 +271,11 @@ class MegatronCheckpointManager(BaseCheckpointManager):
                     key = f"model{vpp_rank}" if len(self.model) > 1 else "model"
                 else:
                     key = "model"
-                while hasattr(model, "module") and not hasattr(model, "sharded_state_dict"):
+                if is_fsdp:
+                    # Megatron-FSDP introduce extra wrapper layers
+                    while hasattr(model, "module") and not hasattr(model, "sharded_state_dict"):
+                        model = model.module
+                elif hasattr(model, "module"):
                     model = model.module
 
                 # GPTModel's sharded_state_dict function when having mtp requires metadata['dp_cp_group']
@@ -280,7 +285,6 @@ class MegatronCheckpointManager(BaseCheckpointManager):
                 state_dict[key] = model.sharded_state_dict(**kwargs)
 
         # Optimizer State Dict (skip for FSDP — upstream sharding not yet supported)
-        is_fsdp = getattr(getattr(self.model[0], "ddp_config", None), "use_megatron_fsdp", False)
         if generate_optimizer and not is_fsdp:
             torch.distributed.barrier()
             sharded_state_dict_kwargs = {"is_loading": is_loading}
