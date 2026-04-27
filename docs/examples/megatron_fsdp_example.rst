@@ -1,7 +1,7 @@
 Megatron-FSDP Example
 ========================
 
-Last updated: 04/08/2026.
+Last updated: 04/26/2026.
 
 Introduction
 ------------
@@ -25,19 +25,17 @@ Use the tested PR branches for ``verl``, ``Megatron-LM``, and ``Megatron-Bridge`
    git fetch origin pull/5423/head:pr-5423
    git checkout pr-5423
 
-   # 2) Megatron-LM
+   # 2) Megatron-LM (pinned to a known-good commit on main)
    cd /root
    git clone https://github.com/NVIDIA/Megatron-LM.git
    cd /root/Megatron-LM
-   git fetch origin pull/3191/head:pr-3191
-   git checkout pr-3191
+   git checkout d4cacef87
 
-   # 3) Megatron-Bridge
+   # 3) Megatron-Bridge (pinned to a known-good commit on main)
    cd /root
    git clone https://github.com/NVIDIA-NeMo/Megatron-Bridge.git
    cd /root/Megatron-Bridge
-   git fetch origin pull/1910/head:pr-1910
-   git checkout pr-1910
+   git checkout 6fea5bb
 
 
 Step 2: Install dependencies and set environment

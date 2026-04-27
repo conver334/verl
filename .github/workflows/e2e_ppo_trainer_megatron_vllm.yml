@@ -197,7 +197,7 @@ jobs:
       - name: Install Megatron-LM and Megatron-Bridge for Megatron-FSDP
         run: |
           pip3 install --no-deps --no-build-isolation git+https://github.com/NVIDIA/Megatron-LM.git@d4cacef87
-          pip3 install --no-deps --no-build-isolation git+https://github.com/NVIDIA-NeMo/Megatron-Bridge.git@525921ae
+          pip3 install --no-deps --no-build-isolation git+https://github.com/NVIDIA-NeMo/Megatron-Bridge.git@6fea5bb
       - name: Running GSM8K E2E PPO training tests on 8 L20 GPUs with Megatron-FSDP (Qwen3)
         run: |
           ray stop --force
