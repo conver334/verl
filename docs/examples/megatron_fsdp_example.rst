@@ -13,7 +13,11 @@ In this example, we run SFT and RL training with Megatron-FSDP:
 Step 1: Prepare code
 --------------------
 
-Use the tested PR branches for ``verl``, ``Megatron-LM``, and ``Megatron-Bridge``:
+The required upstream Megatron-FSDP support is already merged into ``Megatron-LM`` main
+(``Megatron-LM PR #3191 <https://github.com/NVIDIA/Megatron-LM/pull/3191>``__) and
+``Megatron-Bridge`` main
+(``Megatron-Bridge PR #3512 <https://github.com/NVIDIA-NeMo/Megatron-Bridge/pull/3512>``__); the commits below are
+known-good snapshots.
 
 .. code:: bash
 
@@ -37,49 +41,16 @@ Use the tested PR branches for ``verl``, ``Megatron-LM``, and ``Megatron-Bridge`
    cd /root/Megatron-Bridge
    git checkout 6fea5bb
 
-
-Step 2: Install dependencies and set environment
-------------------------------------------------
-
-.. code:: bash
-
-   cd /root/verl
-   pip3 install --no-deps -e .[test]
-   pip3 install "nvidia-modelopt[torch]>=0.37.0" math-verify transformers==4.57.1
-   export PYTHONPATH=/root/Megatron-LM:/root/Megatron-Bridge/src:$PYTHONPATH
-
-   unset CUDA_DEVICE_MAX_CONNECTIONS
-   ray stop --force
-
-Step 3: Prepare datasets
-------------------------
-
-.. code:: bash
-
-   cd /root/verl
-
-   # GSM8K
-   python3 examples/data_preprocess/gsm8k.py \
-     --local_save_dir ~/data/gsm8k
-
-   # MATH
-   python3 examples/data_preprocess/math_dataset.py \
-     --local_save_dir ~/data/math
-
-   # Check generated parquet files
-   ls -lh ~/data/gsm8k/train.parquet ~/data/gsm8k/test.parquet
-   ls -lh ~/data/math/train.parquet ~/data/math/test.parquet
-
-Step 4: Run Megatron-FSDP SFT
+Step 2: Run Megatron-FSDP SFT
 ----------------------------
 
-Before launch, check and update key fields `MODEL_PATH` and `SAVE_PATH` in the script.
+Before launch, check and update key fields ``MODEL_PATH`` and ``SAVE_PATH`` in the script.
 
 .. code:: bash
 
-   bash verl/examples/sft/gsm8k/run_qwen_megatron_fsdp.sh
+   bash examples/sft/gsm8k/run_qwen_megatron_fsdp.sh
 
-Step 5: Run Megatron-FSDP RL
+Step 3: Run Megatron-FSDP RL
 ----------------------------
 
 Before launch, check and update key fields in

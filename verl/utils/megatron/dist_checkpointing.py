@@ -49,11 +49,6 @@ def schedule_async_save_request(async_save_request):
     _get_async_calls_queue().schedule_async_request(async_save_request)
 
 
-def finalize_async_save(blocking=False):
-    """Finalize async checkpoint saves across Megatron versions."""
-    _get_async_calls_queue().maybe_finalize_async_calls(blocking=blocking)
-
-
 def save_dist_checkpointing(
     sharded_state_dict,
     ckpt_path,

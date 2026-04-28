@@ -109,7 +109,7 @@ MEGATRON_FSDP_ENGINE_CONFIG="\
     engine.tensor_model_parallel_size=${TP_SIZE} \
     engine.pipeline_model_parallel_size=${PP_SIZE} \
     engine.use_mbridge=True \
-    engine.vanilla_mbridge=True \
+    engine.vanilla_mbridge=False \
     engine.use_megatron_fsdp=True"
 
 TORCHTITAN_ENGINE_CONFIG="\

@@ -301,8 +301,6 @@ def make_megatron_module(
 
             # Create DDP config if needed
             ddp_config = None
-            if wrap_config.use_megatron_fsdp:
-                wrap_config.wrap_with_ddp = True
             if wrap_config.wrap_with_ddp:
                 from megatron.bridge.training.config import DistributedDataParallelConfig
 
@@ -1400,15 +1398,14 @@ def get_megatron_module_device(models: list[Any]) -> str:
         return "cpu"
 
     model_chunk = models[0]
-    buffers = getattr(model_chunk, "buffers", None)
-    if not isinstance(buffers, list) or not buffers:
+    if not isinstance(model_chunk, DDP) or not model_chunk.buffers:
         try:
             module = getattr(model_chunk, "module", model_chunk)
             return next(module.parameters()).device.type
         except StopIteration:
             return "cpu"
 
-    buffer = buffers[0]
+    buffer = model_chunk.buffers[0]
     if buffer.param_data.storage().size() == 0:
         return "cpu"
     else:

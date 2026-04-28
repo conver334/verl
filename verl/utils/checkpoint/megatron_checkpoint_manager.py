@@ -39,6 +39,7 @@ from verl.utils.megatron_utils import (
     get_dist_checkpoint_path,
     get_hf_model_checkpoint_path,
     get_transformer_config_checkpoint_path,
+    unwrap_model,
 )
 
 from .checkpoint_manager import BaseCheckpointManager
@@ -157,6 +158,7 @@ class MegatronCheckpointManager(BaseCheckpointManager):
         self.vanilla_bridge = self.provider is None
         self.peft_cls = peft_cls
         self.rank = torch.distributed.get_rank()
+        self.use_megatron_fsdp = getattr(getattr(self.model[0], "ddp_config", None), "use_megatron_fsdp", False)
         # Megatron-Bridge is Okay to load/save HF checkpoint for value model as well
         self.use_dist_checkpointing = (
             use_dist_checkpointing or not self.bridge or (self.vanilla_bridge and self.is_value_model)
@@ -263,7 +265,6 @@ class MegatronCheckpointManager(BaseCheckpointManager):
 
         # All ranks save model state dict when it is needed for either model checkpointing
         # or optimizer sharded_state_dict generation.
-        is_fsdp = getattr(getattr(self.model[0], "ddp_config", None), "use_megatron_fsdp", False)
         if should_generate_model_sections:
             for vpp_rank, model in enumerate(self.model):
                 if len(self.model) > 1:
@@ -271,10 +272,8 @@ class MegatronCheckpointManager(BaseCheckpointManager):
                     key = f"model{vpp_rank}" if len(self.model) > 1 else "model"
                 else:
                     key = "model"
-                if is_fsdp:
-                    # Megatron-FSDP introduce extra wrapper layers
-                    while hasattr(model, "module") and not hasattr(model, "sharded_state_dict"):
-                        model = model.module
+                if self.use_megatron_fsdp:
+                    model = unwrap_model(model)
                 elif hasattr(model, "module"):
                     model = model.module
 
@@ -285,7 +284,7 @@ class MegatronCheckpointManager(BaseCheckpointManager):
                 state_dict[key] = model.sharded_state_dict(**kwargs)
 
         # Optimizer State Dict (skip for FSDP — upstream sharding not yet supported)
-        if generate_optimizer and not is_fsdp:
+        if generate_optimizer and not self.use_megatron_fsdp:
             torch.distributed.barrier()
             sharded_state_dict_kwargs = {"is_loading": is_loading}
             if base_metadata is not None:
@@ -484,8 +483,7 @@ class MegatronCheckpointManager(BaseCheckpointManager):
                 self.bridge.load_hf_weights(self.model, hf_model_path)
             log_with_rank(f"Loaded HF model checkpoint from {hf_model_path} with bridge", rank=self.rank, logger=logger)
 
-        is_fsdp = getattr(getattr(self.model[0], "ddp_config", None), "use_megatron_fsdp", False)
-        if self.should_load_optimizer and is_fsdp:
+        if self.should_load_optimizer and self.use_megatron_fsdp:
             log_with_rank(
                 "Skipping optimizer state loading for Megatron FSDP (not yet supported). "
                 "Training will resume with fresh optimizer state.",
@@ -596,8 +594,7 @@ class MegatronCheckpointManager(BaseCheckpointManager):
                 torch.distributed.barrier()
 
         if self.should_save_model:
-            is_fsdp = getattr(getattr(self.model[0], "ddp_config", None), "use_megatron_fsdp", False)
-            if self.use_hf_checkpoint and not is_fsdp:
+            if self.use_hf_checkpoint and not self.use_megatron_fsdp:
                 # Use mbridge to save HF model checkpoint
                 log_with_rank(f"Saving HF model checkpoint to {local_path} with bridge", rank=self.rank, logger=logger)
                 hf_ckpt_path = get_hf_model_checkpoint_path(local_path)
