@@ -1398,7 +1398,7 @@ def get_megatron_module_device(models: list[Any]) -> str:
         return "cpu"
 
     model_chunk = models[0]
-    if not isinstance(model_chunk, DDP) or not model_chunk.buffers:
+    if not model_chunk.buffers or not isinstance(model_chunk.buffers, list):
         try:
             module = getattr(model_chunk, "module", model_chunk)
             return next(module.parameters()).device.type
