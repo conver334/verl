@@ -14,9 +14,9 @@ Step 1: Prepare code
 --------------------
 
 The required upstream Megatron-FSDP support is already merged into ``Megatron-LM`` main
-(``Megatron-LM PR #3191 <https://github.com/NVIDIA/Megatron-LM/pull/3191>``__) and
+(`PR #3191 <https://github.com/NVIDIA/Megatron-LM/pull/3191>`) and
 ``Megatron-Bridge`` main
-(``Megatron-Bridge PR #3512 <https://github.com/NVIDIA-NeMo/Megatron-Bridge/pull/3512>``__); the commits below are
+(`PR #3512 <https://github.com/NVIDIA-NeMo/Megatron-Bridge/pull/3512>`); the commits below are
 known-good snapshots.
 
 .. code:: bash
