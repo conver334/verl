@@ -261,7 +261,7 @@ class MegatronCheckpointManager(BaseCheckpointManager):
         state_dict = {}
         base_metadata = metadata or self._build_sharded_state_dict_metadata()
 
-        should_generate_model_sections = generate_model or generate_optimizer
+        should_generate_model_sections = generate_model or (generate_optimizer and not self.use_megatron_fsdp)
 
         # All ranks save model state dict when it is needed for either model checkpointing
         # or optimizer sharded_state_dict generation.
@@ -594,7 +594,7 @@ class MegatronCheckpointManager(BaseCheckpointManager):
                 torch.distributed.barrier()
 
         if self.should_save_model:
-            if self.use_hf_checkpoint and not self.use_megatron_fsdp:
+            if self.use_hf_checkpoint:
                 # Use mbridge to save HF model checkpoint
                 log_with_rank(f"Saving HF model checkpoint to {local_path} with bridge", rank=self.rank, logger=logger)
                 hf_ckpt_path = get_hf_model_checkpoint_path(local_path)
