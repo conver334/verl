@@ -1,7 +1,7 @@
 Megatron-FSDP Example
 ========================
 
-Last updated: 04/26/2026.
+Last updated: 04/29/2026.
 
 Introduction
 ------------
@@ -10,36 +10,19 @@ In this example, we run SFT and RL training with Megatron-FSDP:
 
 - Runtime image: ``verlai/verl:vllm011.dev7``
 
-Step 1: Prepare code
+Step 1: Prepare
 --------------------
 
-The required upstream Megatron-FSDP support is already merged into ``Megatron-LM`` main
-(`PR #3191 <https://github.com/NVIDIA/Megatron-LM/pull/3191>`) and
-``Megatron-Bridge`` main
-(`PR #3512 <https://github.com/NVIDIA-NeMo/Megatron-Bridge/pull/3512>`); the commits below are
-known-good snapshots.
+Download ``Megatron-LM`` and ``Megatron-Bridge``. The required Megatron-FSDP support has already been merged into
+   ``Megatron-LM`` main
+   (`<https://github.com/NVIDIA/Megatron-LM/pull/3191>`) and
+   ``Megatron-Bridge`` main
+   (`<https://github.com/NVIDIA-NeMo/Megatron-Bridge/pull/3512>`).
 
 .. code:: bash
 
-   cd /root
-
-   # 1) verl
-   git clone https://github.com/verl-project/verl.git
-   cd /root/verl
-   git fetch origin pull/5423/head:pr-5423
-   git checkout pr-5423
-
-   # 2) Megatron-LM (pinned to a known-good commit on main)
-   cd /root
    git clone https://github.com/NVIDIA/Megatron-LM.git
-   cd /root/Megatron-LM
-   git checkout d4cacef87
-
-   # 3) Megatron-Bridge (pinned to a known-good commit on main)
-   cd /root
    git clone https://github.com/NVIDIA-NeMo/Megatron-Bridge.git
-   cd /root/Megatron-Bridge
-   git checkout 6fea5bb
 
 Step 2: Run Megatron-FSDP SFT
 ----------------------------
