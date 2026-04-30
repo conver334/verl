@@ -55,3 +55,19 @@ The script launches RL training and enables Megatron-FSDP with:
 - ``actor_rollout_ref.actor.megatron.use_mbridge=True``
 - ``actor_rollout_ref.actor.megatron.vanilla_mbridge=False``
 - ``actor_rollout_ref.actor.megatron.use_megatron_fsdp=True``
+
+Checkpoint Notes
+----------------
+
+Megatron-FSDP checkpoints are saved as DTensor checkpoints under ``dist_ckpt``.
+When ``checkpoint.save_contents`` includes ``model``, verl also saves the HuggingFace config and
+tokenizer under ``huggingface``; HF weights can also be exported through Megatron-Bridge.
+
+Current Megatron-FSDP checkpoint examples assume:
+
+- ``use_distributed_optimizer=True``.
+- ``CUDA_DEVICE_MAX_CONNECTIONS`` is unset or greater than ``1``.
+- PEFT + Megatron-FSDP checkpoint save/load is not covered by this example yet.
+- ``checkpoint.async_save=True`` is not covered for Megatron-FSDP DTensor checkpoints yet.
+- Megatron-FSDP checkpoints do not support saving optimizer state by itself; include ``model`` whenever
+  ``optimizer`` is listed in ``checkpoint.save_contents``.

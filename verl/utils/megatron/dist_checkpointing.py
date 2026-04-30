@@ -48,9 +48,6 @@ def save_dist_checkpointing(
         validate_access_integrity=validate_sharding_integrity,
     )
 
-    if async_save and "async_strategy" in inspect.signature(dist_checkpointing.save).parameters:
-        save_kwargs["async_strategy"] = "mcore"
-
     if content_metadata is not None:
         if mcore_ge_014:
             save_kwargs["content_metadata"] = content_metadata

@@ -428,6 +428,7 @@ class MegatronEngine(BaseEngine):
             provider=self.provider,
             peft_cls=self.peft_cls,
             use_dist_checkpointing=self.engine_config.use_dist_checkpointing,
+            use_megatron_fsdp=self.engine_config.use_megatron_fsdp,
         )
 
         self.to(

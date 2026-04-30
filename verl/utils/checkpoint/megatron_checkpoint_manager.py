@@ -35,6 +35,11 @@ from verl.utils.device import get_device_name, get_torch_device
 from verl.utils.fs import is_non_local, local_mkdir_safe
 from verl.utils.logger import log_with_rank
 from verl.utils.megatron.dist_checkpointing import load_dist_checkpointing, save_dist_checkpointing
+from verl.utils.megatron.fsdp_dtensor_checkpointing import (
+    load_fsdp_dtensor_checkpointing,
+    preprocess_fsdp_dtensor_state_dict,
+    save_fsdp_dtensor_checkpointing,
+)
 from verl.utils.megatron_utils import (
     get_dist_checkpoint_path,
     get_hf_model_checkpoint_path,
@@ -126,6 +131,7 @@ class MegatronCheckpointManager(BaseCheckpointManager):
         use_distributed_optimizer: bool,
         use_checkpoint_opt_param_scheduler: bool = False,
         use_dist_checkpointing: bool = True,
+        use_megatron_fsdp: bool = False,
         bridge=None,
         provider=None,
         peft_cls=None,
@@ -156,6 +162,7 @@ class MegatronCheckpointManager(BaseCheckpointManager):
         self.provider = provider
         self.vanilla_bridge = self.provider is None
         self.peft_cls = peft_cls
+        self.use_megatron_fsdp = use_megatron_fsdp
         self.rank = torch.distributed.get_rank()
         # Megatron-Bridge is Okay to load/save HF checkpoint for value model as well
         self.use_dist_checkpointing = (
@@ -185,6 +192,11 @@ class MegatronCheckpointManager(BaseCheckpointManager):
             torch.distributed.all_gather_object(rng_state_list, rng_state, group=mpu.get_data_parallel_group())
         else:
             rng_state_list = [rng_state]
+
+        if self.use_megatron_fsdp:
+            pp_rank = mpu.get_pipeline_model_parallel_rank()
+            tp_rank = mpu.get_tensor_model_parallel_rank()
+            return {f"({pp_rank}, {tp_rank})": rng_state_list}
 
         if use_dist_ckpt:
             pp_rank = mpu.get_pipeline_model_parallel_rank()
@@ -267,19 +279,23 @@ class MegatronCheckpointManager(BaseCheckpointManager):
             for vpp_rank, model in enumerate(self.model):
                 if len(self.model) > 1:
                     mpu.set_virtual_pipeline_model_parallel_rank(vpp_rank)
-                    key = f"model{vpp_rank}" if len(self.model) > 1 else "model"
+                    key = f"model{vpp_rank}"
                 else:
                     key = "model"
-                if hasattr(model, "module"):
-                    model = model.module
 
-                # GPTModel's sharded_state_dict function when having mtp requires metadata['dp_cp_group']
-                model_metadata = dict(base_metadata)
-                model_metadata["dp_cp_group"] = mpu.get_data_parallel_group(with_context_parallel=True)
-                kwargs = {"metadata": model_metadata}
-                state_dict[key] = model.sharded_state_dict(**kwargs)
+                if self.use_megatron_fsdp:
+                    state_dict[key] = model.state_dict_for_save_checkpoint()
+                else:
+                    if hasattr(model, "module"):
+                        model = model.module
 
-        # Optimizer State Dict (skip for FSDP — upstream sharding not yet supported)
+                    # GPTModel's sharded_state_dict function when having mtp requires metadata['dp_cp_group']
+                    model_metadata = dict(base_metadata)
+                    model_metadata["dp_cp_group"] = mpu.get_data_parallel_group(with_context_parallel=True)
+                    kwargs = {"metadata": model_metadata}
+                    state_dict[key] = model.sharded_state_dict(**kwargs)
+
+        # Optimizer State Dict
         if generate_optimizer:
             torch.distributed.barrier()
             sharded_state_dict_kwargs = {"is_loading": is_loading}
@@ -320,6 +336,13 @@ class MegatronCheckpointManager(BaseCheckpointManager):
         impossible to enforce a linearly increasing versioning for this whole space.
         """
         metadata: dict = {}
+
+        if self.use_megatron_fsdp:
+            if self.use_distributed_optimizer:
+                metadata["distrib_optim_sharding_type"] = "fsdp_dtensor"
+            metadata["singleton_local_shards"] = False
+            metadata["chained_optim_avoid_prefix"] = True
+            return metadata
 
         if not mcore_ge_014:
             # For backward compatibility with Megatron core < v0.14.0
@@ -383,6 +406,21 @@ class MegatronCheckpointManager(BaseCheckpointManager):
         return apply_peft_adapter_filter_to_state_dict(state_dict, self.peft_cls)
 
     def load_rng_states(self, rng_states, data_parallel_random_init=False, use_dist_ckpt=True):
+        if self.use_megatron_fsdp:
+            pp_rank = mpu.get_pipeline_model_parallel_rank()
+            tp_rank = mpu.get_tensor_model_parallel_rank()
+            key = f"({pp_rank}, {tp_rank})"
+            if key in rng_states:
+                rng_states = rng_states[key]
+            else:
+                log_with_rank(
+                    f"RNG state for PP/TP key {key} not found; falling back to the first saved RNG state.",
+                    rank=self.rank,
+                    logger=logger,
+                    log_only_rank_0=True,
+                )
+                rng_states = next(iter(rng_states.values()))
+
         # access rng_state for data parallel rank
         if data_parallel_random_init:
             rng_states = rng_states[mpu.get_data_parallel_rank()]
@@ -400,6 +438,104 @@ class MegatronCheckpointManager(BaseCheckpointManager):
             raise KeyError
         tensor_parallel.get_cuda_rng_tracker().set_states(rng_states["rng_tracker_states"])
 
+    def _load_model_sections_from_state_dict(self, state_dict: dict):
+        assert "model" in state_dict or any(
+            f"model{vpp_rank}" in state_dict for vpp_rank in range(len(self.model))
+        ), f"Model state dict not found in {state_dict.keys()}."
+        for vpp_rank, model in enumerate(self.model):
+            if len(self.model) == 1:
+                model_state_dict = state_dict["model"]
+            else:
+                assert f"model{vpp_rank}" in state_dict, f"model{vpp_rank} not found in state_dict"
+                model_state_dict = state_dict[f"model{vpp_rank}"]
+            mpu.set_virtual_pipeline_model_parallel_rank(vpp_rank)
+            self.model[vpp_rank].load_state_dict(model_state_dict, strict=self.peft_cls is None)
+
+    def _load_megatron_fsdp_checkpoint(self, local_path: str, dist_checkpoint_path: str):
+        if not os.path.isfile(os.path.join(dist_checkpoint_path, ".metadata")):
+            raise FileNotFoundError(
+                f"Megatron-FSDP checkpoint metadata not found at {dist_checkpoint_path}/.metadata. "
+                "Expected a fsdp_dtensor PyTorch DCP checkpoint."
+            )
+
+        sharded_sd_metadata = self._build_sharded_state_dict_metadata()
+        sharded_state_dict = self.generate_state_dict(
+            self.should_load_model,
+            self.should_load_optimizer,
+            self.should_load_extra,
+            is_loading=True,
+            metadata=sharded_sd_metadata,
+        )
+        log_with_rank(
+            f"Generated Megatron-FSDP DTensor state dict for loading: {sharded_state_dict.keys()}",
+            rank=self.rank,
+            logger=logger,
+        )
+
+        # Keep the original outer mappings for load_state_dict(); DCP fills the shared tensor
+        # objects in place after FSDP preprocessing rewrites the checkpoint layout.
+        model_state_dict_keys = ["model"] if len(self.model) == 1 else [f"model{i}" for i in range(len(self.model))]
+        raw_model_state_dicts = {
+            key: sharded_state_dict[key].copy() for key in model_state_dict_keys if key in sharded_state_dict
+        }
+        raw_optimizer_state_dict = sharded_state_dict["optimizer"].copy() if "optimizer" in sharded_state_dict else None
+
+        state_dict = preprocess_fsdp_dtensor_state_dict(self.transformer_config, sharded_state_dict, self.model[0])
+        state_dict = load_fsdp_dtensor_checkpointing(state_dict, dist_checkpoint_path)
+
+        for key, raw_model_state_dict in raw_model_state_dicts.items():
+            state_dict[key] = raw_model_state_dict
+        if raw_optimizer_state_dict is not None:
+            state_dict["optimizer"] = raw_optimizer_state_dict
+
+        if self.should_load_model:
+            self._load_model_sections_from_state_dict(state_dict)
+            log_with_rank(
+                f"Loaded Megatron-FSDP DTensor model checkpoint from {local_path}", rank=self.rank, logger=logger
+            )
+
+        if self.should_load_optimizer:
+            assert "optimizer" in state_dict, (
+                f"Optimizer state dict not found in {state_dict.keys()}. Please check the checkpoint file {local_path}."
+            )
+            self.optimizer.load_state_dict(state_dict["optimizer"])
+            log_with_rank(
+                f"Loaded Megatron-FSDP DTensor optimizer checkpoint from {local_path}", rank=self.rank, logger=logger
+            )
+            if self.use_checkpoint_opt_param_scheduler:
+                assert "lr_scheduler" in state_dict, (
+                    f"LR scheduler state dict not found in {state_dict.keys()}. Please check the checkpoint file "
+                    f"{local_path}."
+                )
+                if self.lr_scheduler is not None:
+                    self.lr_scheduler.load_state_dict(state_dict["lr_scheduler"])
+                    log_with_rank(f"Loaded LR scheduler checkpoint from {local_path}", rank=self.rank, logger=logger)
+
+        if self.should_load_extra:
+            assert "rng_state" in state_dict, (
+                f"RNG state dict not found in {state_dict.keys()}. Please check the checkpoint file {local_path}."
+            )
+            self.load_rng_states(state_dict["rng_state"])
+            log_with_rank(f"Loaded Megatron-FSDP DTensor RNG states from {local_path}", rank=self.rank, logger=logger)
+
+    def _save_megatron_fsdp_checkpoint(self, dist_checkpoint_path: str):
+        sharded_sd_metadata = self._build_sharded_state_dict_metadata()
+        state_dict = self.generate_state_dict(
+            self.should_save_model,
+            self.should_save_optimizer,
+            self.should_save_extra,
+            metadata=sharded_sd_metadata,
+        )
+        log_with_rank(
+            f"Generated Megatron-FSDP DTensor state dict for saving: {state_dict.keys()}",
+            rank=self.rank,
+            logger=logger,
+        )
+
+        state_dict = preprocess_fsdp_dtensor_state_dict(self.transformer_config, state_dict, self.model[0])
+        save_fsdp_dtensor_checkpointing(state_dict, dist_checkpoint_path)
+        torch.distributed.barrier()
+
     def load_checkpoint(self, local_path: str, hdfs_path: str = None, del_local_after_load=False):
         if local_path is not None:
             assert os.path.exists(local_path), f"Checkpoint path {local_path} does not exist."
@@ -414,6 +550,20 @@ class MegatronCheckpointManager(BaseCheckpointManager):
             pass
 
         dist_checkpoint_path = get_dist_checkpoint_path(local_path)
+
+        if self.use_megatron_fsdp:
+            self._load_megatron_fsdp_checkpoint(local_path, dist_checkpoint_path)
+            if del_local_after_load:
+                try:
+                    os.remove(local_path) if is_non_local(local_path) else None
+                except Exception as e:
+                    log_with_rank(
+                        f"remove local resume ckpt file after loading failed, exception {e} will be ignored",
+                        rank=self.rank,
+                        logger=logger,
+                    )
+            return
+
         self._raise_for_unsupported_peft_checkpoint_layout(local_path, dist_checkpoint_path)
 
         load_content_metadata = getattr(dist_checkpointing, "load_content_metadata", None)
@@ -523,10 +673,14 @@ class MegatronCheckpointManager(BaseCheckpointManager):
 
         local_path = local_mkdir_safe(local_path)
         dist_checkpoint_path = get_dist_checkpoint_path(local_path)
+        hf_config_tokenizer_path = get_hf_model_checkpoint_path(local_path)
 
         # Note that model weights, optimizer states, and extra states are generated
         # together in a state dict, we save them in one time
-        if self.use_dist_checkpointing:
+        if self.use_megatron_fsdp:
+            self._save_megatron_fsdp_checkpoint(dist_checkpoint_path)
+            async_save_request = None
+        elif self.use_dist_checkpointing:
             # Generate state dict for saving
             sharded_sd_metadata = self._build_sharded_state_dict_metadata()
             state_dict = self.generate_state_dict(
@@ -615,7 +769,6 @@ class MegatronCheckpointManager(BaseCheckpointManager):
             # No matter whether we save hf model or not
             if self.rank == 0:
                 # Save tokenizer
-                hf_config_tokenizer_path = get_hf_model_checkpoint_path(local_path)
                 if self.processing_class is not None:
                     self.processing_class.save_pretrained(hf_config_tokenizer_path)
                 # Save huggingface config
