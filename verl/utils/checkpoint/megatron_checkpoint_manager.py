@@ -39,7 +39,6 @@ from verl.utils.megatron_utils import (
     get_dist_checkpoint_path,
     get_hf_model_checkpoint_path,
     get_transformer_config_checkpoint_path,
-    unwrap_model,
 )
 
 from .checkpoint_manager import BaseCheckpointManager
@@ -158,7 +157,6 @@ class MegatronCheckpointManager(BaseCheckpointManager):
         self.vanilla_bridge = self.provider is None
         self.peft_cls = peft_cls
         self.rank = torch.distributed.get_rank()
-        self.use_megatron_fsdp = getattr(getattr(self.model[0], "ddp_config", None), "use_megatron_fsdp", False)
         # Megatron-Bridge is Okay to load/save HF checkpoint for value model as well
         self.use_dist_checkpointing = (
             use_dist_checkpointing or not self.bridge or (self.vanilla_bridge and self.is_value_model)
@@ -261,7 +259,7 @@ class MegatronCheckpointManager(BaseCheckpointManager):
         state_dict = {}
         base_metadata = metadata or self._build_sharded_state_dict_metadata()
 
-        should_generate_model_sections = generate_model or (generate_optimizer and not self.use_megatron_fsdp)
+        should_generate_model_sections = generate_model or generate_optimizer
 
         # All ranks save model state dict when it is needed for either model checkpointing
         # or optimizer sharded_state_dict generation.
@@ -272,9 +270,7 @@ class MegatronCheckpointManager(BaseCheckpointManager):
                     key = f"model{vpp_rank}" if len(self.model) > 1 else "model"
                 else:
                     key = "model"
-                if self.use_megatron_fsdp:
-                    model = unwrap_model(model)
-                elif hasattr(model, "module"):
+                if hasattr(model, "module"):
                     model = model.module
 
                 # GPTModel's sharded_state_dict function when having mtp requires metadata['dp_cp_group']
@@ -284,7 +280,7 @@ class MegatronCheckpointManager(BaseCheckpointManager):
                 state_dict[key] = model.sharded_state_dict(**kwargs)
 
         # Optimizer State Dict (skip for FSDP — upstream sharding not yet supported)
-        if generate_optimizer and not self.use_megatron_fsdp:
+        if generate_optimizer:
             torch.distributed.barrier()
             sharded_state_dict_kwargs = {"is_loading": is_loading}
             if base_metadata is not None:
@@ -483,14 +479,7 @@ class MegatronCheckpointManager(BaseCheckpointManager):
                 self.bridge.load_hf_weights(self.model, hf_model_path)
             log_with_rank(f"Loaded HF model checkpoint from {hf_model_path} with bridge", rank=self.rank, logger=logger)
 
-        if self.should_load_optimizer and self.use_megatron_fsdp:
-            log_with_rank(
-                "Skipping optimizer state loading for Megatron FSDP (not yet supported). "
-                "Training will resume with fresh optimizer state.",
-                rank=self.rank,
-                logger=logger,
-            )
-        elif self.should_load_optimizer:
+        if self.should_load_optimizer:
             assert "optimizer" in state_dict, (
                 f"Optimizer state dict not found in {state_dict.keys()}. Please check the checkpoint file {local_path}."
             )
@@ -781,8 +770,11 @@ class MegatronCheckpointManager(BaseCheckpointManager):
         if self.checkpoint_config.async_save:
             assert async_save_request is not None, "Async save request should not be None when using async save."
             async_save_request.add_finalize_fn(finalize_save_fn)
-            from verl.utils.megatron.dist_checkpointing import schedule_async_save_request
-
-            schedule_async_save_request(async_save_request)
+            try:
+                from megatron.core.dist_checkpointing.strategies.async_utils import AsyncCallsQueue
+                AsyncCallsQueue(persistent=False).schedule_async_request(async_save_request)
+            except ImportError:
+                from megatron.core.dist_checkpointing.strategies.base import async_calls
+                async_calls.schedule_async_request(async_save_request)
         else:
             finalize_save_fn()
