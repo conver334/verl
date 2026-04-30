@@ -3,10 +3,10 @@ set -xeuo pipefail
 
 ########################### Quick Config ###########################
 
-MODEL_PATH=${MODEL_PATH:-/root/models/Qwen2.5-Math-7B}
+MODEL_PATH=${MODEL_PATH:-Qwen/Qwen2.5-Math-7B}
 SAVE_PATH=${SAVE_PATH:-/root/checkpoints/Qwen2.5-Math-7B}
-TRAIN_FILES=${TRAIN_FILES:-$HOME/data/gsm8k/train.parquet}
-VAL_FILES=${VAL_FILES:-$HOME/data/gsm8k/test.parquet}
+TRAIN_FILES=${TRAIN_FILES:-$HOME/data/gsm8k_sft/train.parquet}
+VAL_FILES=${VAL_FILES:-$HOME/data/gsm8k_sft/test.parquet}
 
 NPROC=${NPROC:-8}
 TP=${TP:-4}
@@ -57,6 +57,7 @@ ENGINE=(
     engine.use_mbridge=True
     engine.vanilla_mbridge=False
     engine.use_megatron_fsdp=True
+    +engine.override_transformer_config.gradient_accumulation_fusion=False
 )
 
 TRAINER=(

@@ -16,7 +16,7 @@ rollout_mode=${rollout_mode:-async}
 return_raw_chat=${return_raw_chat:-True}
 USE_FUSED_KERNELS=${USE_FUSED_KERNELS:-False}
 
-HF_MODEL_PATH=${HF_MODEL_PATH:-Qwen/Qwen2-7B-Instruct}
+HF_MODEL_PATH=${HF_MODEL_PATH:-Qwen/Qwen2.5-Math-7B}
 gsm8k_train_path=${gsm8k_train_path:-$HOME/data/gsm8k/train.parquet}
 gsm8k_test_path=${gsm8k_test_path:-$HOME/data/gsm8k/test.parquet}
 math_train_path=${math_train_path:-$HOME/data/math/train.parquet}
@@ -56,7 +56,7 @@ ACTOR=(
     actor_rollout_ref.actor.megatron.use_mbridge=True
     actor_rollout_ref.actor.megatron.vanilla_mbridge=False
     actor_rollout_ref.actor.megatron.use_megatron_fsdp=True
-    +actor_rollout_ref.actor.megatron.override_transformer_config.gradient_accumulation_fusion=False
+    ++actor_rollout_ref.actor.megatron.override_transformer_config.gradient_accumulation_fusion=False
 )
 
 ROLLOUT=(
@@ -72,6 +72,10 @@ REF=(
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=2
     actor_rollout_ref.ref.megatron.pipeline_model_parallel_size=${PP}
     actor_rollout_ref.ref.megatron.tensor_model_parallel_size=${TP}
+    actor_rollout_ref.ref.megatron.use_mbridge=True
+    actor_rollout_ref.ref.megatron.vanilla_mbridge=False
+    actor_rollout_ref.ref.megatron.use_megatron_fsdp=True
+    ++actor_rollout_ref.ref.megatron.override_transformer_config.gradient_accumulation_fusion=False
 )
 
 ALGORITHM=(
