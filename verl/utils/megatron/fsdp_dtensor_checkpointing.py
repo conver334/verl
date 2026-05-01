@@ -57,7 +57,7 @@ class _FsdpDtensorModelAdapter:
     def get_parameter(self, target: str):
         candidates = [target]
         if target.startswith("module."):
-            candidates.append(f"module.module.{target[len('module.'):]}")
+            candidates.append(f"module.module.{target[len('module.') :]}")
         else:
             candidates.append(f"module.{target}")
             candidates.append(f"module.module.{target}")

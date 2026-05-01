@@ -439,9 +439,9 @@ class MegatronCheckpointManager(BaseCheckpointManager):
         tensor_parallel.get_cuda_rng_tracker().set_states(rng_states["rng_tracker_states"])
 
     def _load_model_sections_from_state_dict(self, state_dict: dict):
-        assert "model" in state_dict or any(
-            f"model{vpp_rank}" in state_dict for vpp_rank in range(len(self.model))
-        ), f"Model state dict not found in {state_dict.keys()}."
+        assert "model" in state_dict or any(f"model{vpp_rank}" in state_dict for vpp_rank in range(len(self.model))), (
+            f"Model state dict not found in {state_dict.keys()}."
+        )
         for vpp_rank, model in enumerate(self.model):
             if len(self.model) == 1:
                 model_state_dict = state_dict["model"]
@@ -925,9 +925,11 @@ class MegatronCheckpointManager(BaseCheckpointManager):
             async_save_request.add_finalize_fn(finalize_save_fn)
             try:
                 from megatron.core.dist_checkpointing.strategies.async_utils import AsyncCallsQueue
+
                 AsyncCallsQueue(persistent=False).schedule_async_request(async_save_request)
             except ImportError:
                 from megatron.core.dist_checkpointing.strategies.base import async_calls
+
                 async_calls.schedule_async_request(async_save_request)
         else:
             finalize_save_fn()
